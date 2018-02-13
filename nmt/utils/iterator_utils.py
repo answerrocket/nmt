@@ -37,13 +37,18 @@ def get_infer_iterator(src_dataset,
                        eos,
                        src_max_len=None):
   src_eos_id = tf.cast(src_vocab_table.lookup(tf.constant(eos)), tf.int32)
-  src_dataset = src_dataset.map(lambda src: tf.string_split([src]).values)
+  src_dataset = src_dataset.map(lambda src: tf.string_split([src], delimiter=",").values)
 
   if src_max_len:
     src_dataset = src_dataset.map(lambda src: src[:src_max_len])
-  # Convert the word strings to ids
+  # # Convert the word strings to ids
+  # src_dataset = src_dataset.map(
+  #     lambda src: tf.cast(src_vocab_table.lookup(src), tf.int32))
+
+  # parse the ints in the file - original JSON corpus is preprocessed
   src_dataset = src_dataset.map(
-      lambda src: tf.cast(src_vocab_table.lookup(src), tf.int32))
+      lambda src: tf.string_to_number(src, tf.int32, name="src_parse"))
+
   # Add in the word counts.
   src_dataset = src_dataset.map(lambda src: (src, tf.size(src)))
 
@@ -94,9 +99,9 @@ def get_iterator(src_dataset,
                  reshuffle_each_iteration=True):
   if not output_buffer_size:
     output_buffer_size = batch_size * 1000
-  src_eos_id = tf.cast(src_vocab_table.lookup(tf.constant(eos)), tf.int32)
-  tgt_sos_id = tf.cast(tgt_vocab_table.lookup(tf.constant(sos)), tf.int32)
-  tgt_eos_id = tf.cast(tgt_vocab_table.lookup(tf.constant(eos)), tf.int32)
+  src_eos_id = tf.cast(src_vocab_table.lookup(tf.constant(eos)), tf.int32, name="src_eos_id_cast")
+  tgt_sos_id = tf.cast(tgt_vocab_table.lookup(tf.constant(sos)), tf.int32, name="tgt_sos_id_cast")
+  tgt_eos_id = tf.cast(tgt_vocab_table.lookup(tf.constant(eos)), tf.int32, name="tgt_eos_id_cast")
 
   src_tgt_dataset = tf.data.Dataset.zip((src_dataset, tgt_dataset))
 
@@ -109,7 +114,7 @@ def get_iterator(src_dataset,
 
   src_tgt_dataset = src_tgt_dataset.map(
       lambda src, tgt: (
-          tf.string_split([src]).values, tf.string_split([tgt]).values),
+          tf.string_split([src], delimiter=",").values, tf.string_split([tgt], delimiter=",").values),
       num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
 
   # Filter zero length input sequences.
@@ -124,12 +129,21 @@ def get_iterator(src_dataset,
     src_tgt_dataset = src_tgt_dataset.map(
         lambda src, tgt: (src, tgt[:tgt_max_len]),
         num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
-  # Convert the word strings to ids.  Word strings that are not in the
-  # vocab get the lookup table's default_value integer.
+
+  # # Convert the word strings to ids.  Word strings that are not in the
+  # # vocab get the lookup table's default_value integer.
+  # src_tgt_dataset = src_tgt_dataset.map(
+  #     lambda src, tgt: (tf.cast(src_vocab_table.lookup(src), tf.int32),
+  #                       tf.cast(tgt_vocab_table.lookup(tgt), tf.int32)),
+  #     num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
+
+  # parse the ints in the file - original JSON corpus is preprocessed
   src_tgt_dataset = src_tgt_dataset.map(
-      lambda src, tgt: (tf.cast(src_vocab_table.lookup(src), tf.int32),
-                        tf.cast(tgt_vocab_table.lookup(tgt), tf.int32)),
+      lambda src, tgt: (tf.string_to_number(src, tf.int32, name="src_parse"),
+                        tf.string_to_number(tgt, tf.int32, name="tgt_parse")),
       num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
+
+
   # Create a tgt_input prefixed with <sos> and a tgt_output suffixed with <eos>.
   src_tgt_dataset = src_tgt_dataset.map(
       lambda src, tgt: (src,
