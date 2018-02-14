@@ -286,6 +286,10 @@ def add_arguments(parser):
   parser.add_argument("--num_intra_threads", type=int, default=0,
                       help="number of intra_op_parallelism_threads")
 
+  # PQC options
+  parser.add_argument("--epoch_logging", type="bool", default=True,
+                      help="Whether to eval and take a checkpoint after each epoch.")
+
 
 def create_hparams(flags):
   """Create training hparams."""
@@ -367,6 +371,9 @@ def create_hparams(flags):
       avg_ckpts=flags.avg_ckpts,
       num_intra_threads=flags.num_intra_threads,
       num_inter_threads=flags.num_inter_threads,
+
+      # PQC options
+      epoch_logging=flags.epoch_logging
   )
 
 
