@@ -246,12 +246,16 @@ def add_arguments(parser):
                       help="Checkpoint file to load a model for inference.")
   parser.add_argument("--inference_input_file", type=str, default=None,
                       help="Set to the text to decode.")
+  parser.add_argument("--vectorization_input_file", type=str, default=None,
+                      help="Set to the samples to vectorize.")
   parser.add_argument("--inference_list", type=str, default=None,
                       help=("A comma-separated list of sentence indices "
                             "(0-based) to decode."))
   parser.add_argument("--infer_batch_size", type=int, default=32,
                       help="Batch size for inference mode.")
   parser.add_argument("--inference_output_file", type=str, default=None,
+                      help="Output file to store decoding results.")
+  parser.add_argument("--vectorization_output_file", type=str, default=None,
                       help="Output file to store decoding results.")
   parser.add_argument("--inference_ref_file", type=str, default=None,
                       help=("""\
@@ -546,7 +550,7 @@ def create_or_load_hparams(
   return hparams
 
 
-def run_main(flags, default_hparams, train_fn, inference_fn, target_session=""):
+def run_main(flags, default_hparams, train_fn, inference_fn, target_session="", vectorization_fn=None):
   """Run main."""
   # Job
   jobid = flags.jobid
@@ -593,6 +597,34 @@ def run_main(flags, default_hparams, train_fn, inference_fn, target_session=""):
             metric,
             hparams.subword_option)
         utils.print_out("  %s: %.1f" % (metric, score))
+  elif flags.vectorization_input_file:
+    if not vectorization_fn:
+      raise Exception("No vectorization_fn provided")
+
+    # Inference indices
+    hparams.inference_indices = None
+    # if flags.inference_list:
+    #   (hparams.inference_indices) = (
+    #       [int(token)  for token in flags.inference_list.split(",")])
+
+    # Vectorization
+    trans_file = flags.vectorization_output_file
+    ckpt = flags.ckpt
+    if not ckpt:
+      ckpt = tf.train.latest_checkpoint(out_dir)
+    vectorization_fn(ckpt, flags.vectorization_input_file,
+                     trans_file, hparams, num_workers, jobid)
+
+    # Evaluation
+    ref_file = flags.inference_ref_file
+    if ref_file and tf.gfile.Exists(trans_file):
+      for metric in hparams.metrics:
+        score = evaluation_utils.evaluate(
+            ref_file,
+            trans_file,
+            metric,
+            hparams.subword_option)
+        utils.print_out("  %s: %.1f" % (metric, score))
   else:
     # Train
     train_fn(hparams, target_session=target_session)
@@ -602,7 +634,8 @@ def main(unused_argv):
   default_hparams = create_hparams(FLAGS)
   train_fn = train.train
   inference_fn = inference.inference
-  run_main(FLAGS, default_hparams, train_fn, inference_fn)
+  vectorization_fn = inference.vectorisation
+  run_main(FLAGS, default_hparams, train_fn, inference_fn,vectorization_fn=vectorization_fn)
 
 
 if __name__ == "__main__":

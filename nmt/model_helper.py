@@ -215,6 +215,46 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
       iterator=iterator)
 
 
+def create_vector_model(model_creator, hparams, scope=None, extra_args=None):
+  """Create vectorisation model."""
+  graph = tf.Graph()
+  src_vocab_file = hparams.src_vocab_file
+  tgt_vocab_file = hparams.tgt_vocab_file
+
+  with graph.as_default(), tf.container(scope or "vectorise"):
+    src_vocab_table, tgt_vocab_table = vocab_utils.create_vocab_tables(
+      src_vocab_file, tgt_vocab_file, hparams.share_vocab)
+    reverse_tgt_vocab_table = lookup_ops.index_to_string_table_from_file(
+      tgt_vocab_file, default_value=vocab_utils.UNK)
+
+    src_placeholder = tf.placeholder(shape=[None], dtype=tf.string)
+    batch_size_placeholder = tf.placeholder(shape=[], dtype=tf.int64)
+
+    src_dataset = tf.data.Dataset.from_tensor_slices(
+      src_placeholder)
+    iterator = iterator_utils.get_infer_iterator(
+      src_dataset,
+      src_vocab_table,
+      batch_size=batch_size_placeholder,
+      eos=hparams.eos,
+      src_max_len=hparams.src_max_len_infer)
+    model = model_creator(
+      hparams,
+      iterator=iterator,
+      mode="VECTOR",
+      source_vocab_table=src_vocab_table,
+      target_vocab_table=tgt_vocab_table,
+      reverse_target_vocab_table=reverse_tgt_vocab_table,
+      scope=scope,
+      extra_args=extra_args)
+  return InferModel(
+    graph=graph,
+    model=model,
+    src_placeholder=src_placeholder,
+    batch_size_placeholder=batch_size_placeholder,
+    iterator=iterator)
+
+
 def _get_embed_device(vocab_size):
   """Decide on which device to place an embed matrix given its vocab size."""
   if vocab_size > VOCAB_SIZE_THRESHOLD_CPU:

@@ -119,6 +119,46 @@ def inference(ckpt,
         jobid=jobid)
 
 
+def vectorisation(ckpt,
+                  vectorisation_input_file,
+                  vectorisation_output_file,
+                  hparams,
+                  num_workers=1,
+                  jobid=0,
+                  scope=None):
+  """Perform vectorisation - convert random length samples to fixed length context vectors."""
+  if hparams.inference_indices:
+    assert num_workers == 1
+
+  if not hparams.attention:
+    model_creator = nmt_model.Model
+  elif hparams.attention_architecture == "standard":
+    model_creator = attention_model.AttentionModel
+  elif hparams.attention_architecture in ["gnmt", "gnmt_v2"]:
+    model_creator = gnmt_model.GNMTModel
+  else:
+    raise ValueError("Unknown model architecture")
+  vectorisation_model = model_helper.create_vector_model(model_creator, hparams, scope)
+
+  if num_workers == 1:
+    single_worker_vectorisation(
+        vectorisation_model,
+        ckpt,
+        vectorisation_input_file,
+        vectorisation_output_file,
+        hparams)
+  else:
+    raise NotImplementedError("Multi worker vectorisation not supported.")
+    # multi_worker_inference(
+    #     vectorisation_model,
+    #     ckpt,
+    #     inference_input_file,
+    #     inference_output_file,
+    #     hparams,
+    #     num_workers=num_workers,
+    #     jobid=jobid)
+
+
 def single_worker_inference(infer_model,
                             ckpt,
                             inference_input_file,
@@ -163,6 +203,48 @@ def single_worker_inference(infer_model,
           beam_width=hparams.beam_width,
           tgt_eos=hparams.eos,
           num_translations_per_input=hparams.num_translations_per_input)
+
+
+def single_worker_vectorisation(vector_model,
+                                ckpt,
+                                vectorisation_input_file,
+                                vectorisation_output_file,
+                                hparams):
+  """Inference with a single worker."""
+  output_vector = vectorisation_output_file
+
+  # Read data
+  vectorisation_data = load_data(vectorisation_input_file, hparams)
+
+  with tf.Session(
+      graph=vector_model.graph, config=utils.get_config_proto()) as sess:
+    loaded_vector_model = model_helper.load_model(
+        vector_model.model, ckpt, sess, "infer")
+    sess.run(
+        vector_model.iterator.initializer,
+        feed_dict={
+            vector_model.src_placeholder: vectorisation_data,
+            vector_model.batch_size_placeholder: hparams.infer_batch_size
+        })
+    # Decode
+    utils.print_out("# Start encoding")
+    if hparams.inference_indices:
+      raise NotImplementedError("Vectorisation inference_indices not supported.")
+      # _decode_inference_indices(
+      #     loaded_vector_model,
+      #     sess,
+      #     output_infer=output_infer,
+      #     output_infer_summary_prefix=output_infer,
+      #     inference_indices=hparams.inference_indices,
+      #     tgt_eos=hparams.eos,
+      #     subword_option=hparams.subword_option)
+    else:
+      nmt_utils.vectorize(
+        loaded_vector_model,
+        sess,
+        output_vector,
+        beam_width=hparams.beam_width,
+        num_vectors_per_input=hparams.num_translations_per_input)
 
 
 def multi_worker_inference(infer_model,

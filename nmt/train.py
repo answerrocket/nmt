@@ -354,17 +354,6 @@ def train(hparams, scope=None, target_session=""):
     except tf.errors.OutOfRangeError:
       # Finished going through the training dataset.  Go to next epoch.
       hparams.epoch_step = 0
-      utils.print_out(
-          "# Finished an epoch, step %d. Perform external evaluation" %
-          global_step)
-      run_sample_decode(infer_model, infer_sess, model_dir, hparams,
-                        summary_writer, sample_src_data, sample_tgt_data)
-      run_external_eval(infer_model, infer_sess, model_dir, hparams,
-                        summary_writer)
-
-      if avg_ckpts:
-        run_avg_external_eval(infer_model, infer_sess, model_dir, hparams,
-                              summary_writer, global_step)
       if hparams.epoch_logging:
         utils.print_out(
             "# Finished an epoch, step %d. Perform external evaluation" %

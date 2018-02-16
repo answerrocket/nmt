@@ -107,3 +107,65 @@ def get_translation(nmt_outputs, sent_id, tgt_eos, subword_option):
     translation = utils.format_text(output)
 
   return translation
+
+
+def vectorize(model,
+              sess,
+              vector_file,
+              beam_width,
+              num_vectors_per_input=1):
+  """Decode a test set and compute a score according to the evaluation task."""
+  utils.print_out("  vectorizing to output %s." % vector_file)
+
+  start_time = time.time()
+  num_sentences = 0
+  with codecs.getwriter("utf-8")(
+    tf.gfile.GFile(vector_file, mode="wb")) as vector_f:
+    vector_f.write("")  # Write empty string to ensure file is created.
+
+    num_vectors_per_input = max(
+      min(num_vectors_per_input, beam_width), 1)
+    while True:
+      try:
+        nmt_vectors = model.vectorise(sess)
+        # shape we get here is RNN layer, (h/c), sentence_index, RNN units
+        nmt_vectors = np.transpose(np.asarray(nmt_vectors), (2, 0, 1, 3))
+
+        if beam_width != 0:
+          raise NotImplementedError("Non-zero-beam-width vectorisation is not supported.")
+
+        batch_size = nmt_vectors.shape[0]
+        num_sentences += batch_size
+
+        for sent_id in range(batch_size):
+          # for beam_id in range(num_vectors_per_input):
+          vector = get_vectorisation(nmt_vectors[sent_id])
+          vector_f.write((vector + b"\n").decode("utf-8"))
+      except tf.errors.OutOfRangeError:
+        utils.print_time(
+          "  done, num sentences %d, num translations per input %d" %
+          (num_sentences, num_vectors_per_input), start_time)
+        break
+
+
+def get_vectorisation(encoded_state):
+  """Given batch encoding outputs, select a sentence and turn to a string."""
+  # if tgt_eos: tgt_eos = tgt_eos.encode("utf-8")
+  # Select a sentence
+  # output = nmt_outputs[sent_id, :].tolist()
+  vector = utils.format_floats(encoded_state)
+
+  # # If there is an eos symbol in outputs, cut them at that point.
+  # if tgt_eos and tgt_eos in output:
+  #   output = output[:output.index(tgt_eos)]
+
+  # if subword_option == "bpe":  # BPE
+  #   translation = utils.format_bpe_text(output)
+  # elif subword_option == "spm":  # SPM
+  #   translation = utils.format_spm_text(output)
+  # else:
+  #   translation = utils.format_text(output)
+
+  return vector
+
+

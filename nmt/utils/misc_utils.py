@@ -21,6 +21,7 @@ import collections
 import json
 import math
 import os
+import struct
 import sys
 import time
 
@@ -158,6 +159,31 @@ def format_text(words):
       not isinstance(words, collections.Iterable)):
     words = [words]
   return b" ".join(words)
+
+
+def is_array(thing):
+  return hasattr(thing, "__len__") or isinstance(thing, collections.Iterable)
+
+
+def format_float(f):
+  if type(f) is float:
+    return struct.pack("!d", f)
+  elif type(f) is np.float32:
+    # TODO: not sure the most accurate representation for numpy float32
+    return str(f)
+  else:
+    return str(f)
+
+
+def format_floats(floats):
+  """Convert a sequence of floats into a string representation."""
+  if not is_array(floats):
+    floats = [floats]
+
+  if is_array(floats[0]):
+    floats = [format_floats(sub_list) for sub_list in floats]
+
+  return b",".join([format_float(f) for f in floats])
 
 
 def format_bpe_text(symbols, delimiter=b"@@"):

@@ -116,11 +116,13 @@ class BaseModel(object):
     elif self.mode == tf.contrib.learn.ModeKeys.EVAL:
       self.eval_loss = res[1]
     elif self.mode == tf.contrib.learn.ModeKeys.INFER:
-      self.infer_logits, _, self.final_context_state, self.sample_id = res
+      self.infer_logits, _, self.final_context_state, self.sample_id, _ = res
       self.sample_words = reverse_target_vocab_table.lookup(
           tf.to_int64(self.sample_id))
+    elif self.mode == "VECTOR":
+      self.sample_vector = res[4]
 
-    if self.mode != tf.contrib.learn.ModeKeys.INFER:
+    if self.mode not in [tf.contrib.learn.ModeKeys.INFER, "VECTOR"]:
       ## Count the number of predicted words for compute ppl.
       self.predict_count = tf.reduce_sum(
           self.iterator.target_sequence_length)
@@ -163,7 +165,7 @@ class BaseModel(object):
           tf.summary.scalar("train_loss", self.train_loss),
       ] + grad_norm_summary)
 
-    if self.mode == tf.contrib.learn.ModeKeys.INFER:
+    if self.mode in [tf.contrib.learn.ModeKeys.INFER, "VECTOR"]:
       self.infer_summary = self._get_infer_summary(hparams)
 
     # Saver
@@ -299,18 +301,20 @@ class BaseModel(object):
       encoder_outputs, encoder_state = self._build_encoder(hparams)
 
       ## Decoder
+      # TODO: avoid building decoder in VECTOR mode - left in to avoid breaking graph
       logits, sample_id, final_context_state = self._build_decoder(
           encoder_outputs, encoder_state, hparams)
 
       ## Loss
-      if self.mode != tf.contrib.learn.ModeKeys.INFER:
+      if self.mode not in [tf.contrib.learn.ModeKeys.INFER, "VECTOR"]:
         with tf.device(model_helper.get_device_str(self.num_encoder_layers - 1,
                                                    self.num_gpus)):
           loss = self._compute_loss(logits)
       else:
         loss = None
 
-      return logits, loss, final_context_state, sample_id
+      # TODO: maybe encoder_state is redundant with final_context_state????
+      return logits, loss, final_context_state, sample_id, encoder_state
 
   @abc.abstractmethod
   def _build_encoder(self, hparams):
@@ -384,7 +388,7 @@ class BaseModel(object):
           iterator.source_sequence_length)
 
       ## Train or eval
-      if self.mode != tf.contrib.learn.ModeKeys.INFER:
+      if self.mode not in [tf.contrib.learn.ModeKeys.INFER, "VECTOR"]:
         # decoder_emp_inp: [max_time, batch_size, num_units]
         target_input = iterator.target_input
         if self.time_major:
@@ -521,6 +525,12 @@ class BaseModel(object):
         self.infer_logits, self.infer_summary, self.sample_id, self.sample_words
     ])
 
+  def vector(self, sess):
+    assert self.mode == "VECTOR"
+    return sess.run(
+      self.sample_vector
+    )
+
   def decode(self, sess):
     """Decode a batch.
 
@@ -542,6 +552,24 @@ class BaseModel(object):
       sample_words = sample_words.transpose([2, 0, 1])
     return sample_words, infer_summary
 
+  def vectorise(self, sess):
+    """Vectorise a batch.
+
+    Args:
+      sess: tensorflow session to use.
+
+    Returns:
+      A tensor of the encoded state
+    """
+    sample_vector = self.vector(sess)
+
+    # if self.time_major:
+    #   sample_vector = sample_vector.transpose()
+    # elif sample_vector.ndim == 3:  # beam search output in [batch_size,
+    #   # time, beam_width] shape.
+    #   sample_vector = sample_vector.transpose([2, 0, 1])
+
+    return sample_vector
 
 class Model(BaseModel):
   """Sequence-to-sequence dynamic model.
