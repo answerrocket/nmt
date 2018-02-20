@@ -171,7 +171,7 @@ def create_eval_model(model_creator, hparams, scope=None, extra_args=None):
 class InferModel(
     collections.namedtuple("InferModel",
                            ("graph", "model", "src_placeholder",
-                            "batch_size_placeholder", "iterator"))):
+                            "batch_size_placeholder", "iterator", "src_vocab_file_name_ph"))):
   pass
 
 
@@ -187,8 +187,8 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
     reverse_tgt_vocab_table = lookup_ops.index_to_string_table_from_file(
         tgt_vocab_file, default_value=vocab_utils.UNK)
 
-    src_placeholder = tf.placeholder(shape=[None], dtype=tf.string)
-    batch_size_placeholder = tf.placeholder(shape=[], dtype=tf.int64)
+    src_placeholder = tf.placeholder(shape=[None], dtype=tf.string, name="SourceInputSequence_ph")
+    batch_size_placeholder = tf.placeholder(shape=[], dtype=tf.int64, name="MaxInputSequenceLength_ph")
 
     src_dataset = tf.data.Dataset.from_tensor_slices(
         src_placeholder)
@@ -222,13 +222,15 @@ def create_vector_model(model_creator, hparams, scope=None, extra_args=None):
   tgt_vocab_file = hparams.tgt_vocab_file
 
   with graph.as_default(), tf.container(scope or "vectorise"):
+    src_vocab_file_name_ph = tf.placeholder(dtype=tf.string, name="SourceVocabFilename_ph")
+
     src_vocab_table, tgt_vocab_table = vocab_utils.create_vocab_tables(
-      src_vocab_file, tgt_vocab_file, hparams.share_vocab)
+      src_vocab_file_name_ph, tgt_vocab_file, hparams.share_vocab)
     reverse_tgt_vocab_table = lookup_ops.index_to_string_table_from_file(
       tgt_vocab_file, default_value=vocab_utils.UNK)
 
-    src_placeholder = tf.placeholder(shape=[None], dtype=tf.string)
-    batch_size_placeholder = tf.placeholder(shape=[], dtype=tf.int64)
+    src_placeholder = tf.placeholder(shape=[None], dtype=tf.string, name="SourceInputSequence_ph")
+    batch_size_placeholder = tf.placeholder(shape=[], dtype=tf.int64, name="MaxInputSequenceLength_ph")
 
     src_dataset = tf.data.Dataset.from_tensor_slices(
       src_placeholder)
@@ -252,20 +254,24 @@ def create_vector_model(model_creator, hparams, scope=None, extra_args=None):
     model=model,
     src_placeholder=src_placeholder,
     batch_size_placeholder=batch_size_placeholder,
-    iterator=iterator)
+    iterator=iterator,
+    src_vocab_file_name_ph=src_vocab_file_name_ph)
 
 
-def _get_embed_device(vocab_size):
+def _get_embed_device(vocab_size, hparams):
   """Decide on which device to place an embed matrix given its vocab size."""
-  if vocab_size > VOCAB_SIZE_THRESHOLD_CPU:
+  if hparams.num_gpus < 1:
     return "/cpu:0"
   else:
-    return "/gpu:0"
+    if vocab_size > VOCAB_SIZE_THRESHOLD_CPU:
+      return "/cpu:0"
+    else:
+      return "/gpu:0"
 
 
 def _create_pretrained_emb_from_txt(
     vocab_file, embed_file, num_trainable_tokens=3, dtype=tf.float32,
-    scope=None):
+    scope=None, hparams=None):
   """Load pretrain embeding from embed_file, and return an embedding matrix.
 
   Args:
@@ -290,19 +296,19 @@ def _create_pretrained_emb_from_txt(
   emb_mat = tf.constant(emb_mat)
   emb_mat_const = tf.slice(emb_mat, [num_trainable_tokens, 0], [-1, -1])
   with tf.variable_scope(scope or "pretrain_embeddings", dtype=dtype) as scope:
-    with tf.device(_get_embed_device(num_trainable_tokens)):
+    with tf.device(_get_embed_device(num_trainable_tokens, hparams)):
       emb_mat_var = tf.get_variable(
           "emb_mat_var", [num_trainable_tokens, emb_size])
   return tf.concat([emb_mat_var, emb_mat_const], 0)
 
 
 def _create_or_load_embed(embed_name, vocab_file, embed_file,
-                          vocab_size, embed_size, dtype):
+                          vocab_size, embed_size, dtype, hparams):
   """Create a new or load an existing embedding matrix."""
   if vocab_file and embed_file:
-    embedding = _create_pretrained_emb_from_txt(vocab_file, embed_file)
+    embedding = _create_pretrained_emb_from_txt(vocab_file, embed_file, hparams)
   else:
-    with tf.device(_get_embed_device(vocab_size)):
+    with tf.device(_get_embed_device(vocab_size, hparams)):
       embedding = tf.get_variable(
           embed_name, [vocab_size, embed_size], dtype)
   return embedding
@@ -319,7 +325,8 @@ def create_emb_for_encoder_and_decoder(share_vocab,
                                        tgt_vocab_file=None,
                                        src_embed_file=None,
                                        tgt_embed_file=None,
-                                       scope=None):
+                                       scope=None,
+                                       hparams=None):
   """Create embedding matrix for both encoder and decoder.
 
   Args:
@@ -371,18 +378,18 @@ def create_emb_for_encoder_and_decoder(share_vocab,
 
       embedding_encoder = _create_or_load_embed(
           "embedding_share", vocab_file, embed_file,
-          src_vocab_size, src_embed_size, dtype)
+          src_vocab_size, src_embed_size, dtype, hparams)
       embedding_decoder = embedding_encoder
     else:
       with tf.variable_scope("encoder", partitioner=partitioner):
         embedding_encoder = _create_or_load_embed(
             "embedding_encoder", src_vocab_file, src_embed_file,
-            src_vocab_size, src_embed_size, dtype)
+            src_vocab_size, src_embed_size, dtype, hparams)
 
       with tf.variable_scope("decoder", partitioner=partitioner):
         embedding_decoder = _create_or_load_embed(
             "embedding_decoder", tgt_vocab_file, tgt_embed_file,
-            tgt_vocab_size, tgt_embed_size, dtype)
+            tgt_vocab_size, tgt_embed_size, dtype, hparams)
 
   return embedding_encoder, embedding_decoder
 
@@ -518,10 +525,10 @@ def gradient_clip(gradients, max_gradient_norm):
   return clipped_gradients, gradient_norm_summary, gradient_norm
 
 
-def load_model(model, ckpt, session, name):
+def load_model(model, ckpt, session, name, feed_dict):
   start_time = time.time()
   model.saver.restore(session, ckpt)
-  session.run(tf.tables_initializer())
+  session.run(tf.tables_initializer(), feed_dict=feed_dict)
   utils.print_out(
       "  loaded %s model parameters from %s, time %.2fs" %
       (name, ckpt, time.time() - start_time))

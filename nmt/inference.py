@@ -19,7 +19,9 @@ from __future__ import print_function
 import codecs
 import time
 
+import os
 import tensorflow as tf
+from tensorflow.python.saved_model import tag_constants
 
 from . import attention_model
 from . import gnmt_model
@@ -173,7 +175,7 @@ def single_worker_inference(infer_model,
   with tf.Session(
       graph=infer_model.graph, config=utils.get_config_proto()) as sess:
     loaded_infer_model = model_helper.load_model(
-        infer_model.model, ckpt, sess, "infer")
+        infer_model.model, ckpt, sess, "infer", hparams)
     sess.run(
         infer_model.iterator.initializer,
         feed_dict={
@@ -218,14 +220,16 @@ def single_worker_vectorisation(vector_model,
 
   with tf.Session(
       graph=vector_model.graph, config=utils.get_config_proto()) as sess:
+    feed_dict={
+      vector_model.src_placeholder: vectorisation_data,
+      vector_model.batch_size_placeholder: hparams.infer_batch_size,
+      vector_model.src_vocab_file_name_ph: hparams.src_vocab_file
+    }
     loaded_vector_model = model_helper.load_model(
-        vector_model.model, ckpt, sess, "infer")
+        vector_model.model, ckpt, sess, "infer", feed_dict)
     sess.run(
         vector_model.iterator.initializer,
-        feed_dict={
-            vector_model.src_placeholder: vectorisation_data,
-            vector_model.batch_size_placeholder: hparams.infer_batch_size
-        })
+        feed_dict=feed_dict)
     # Decode
     utils.print_out("# Start encoding")
     if hparams.inference_indices:
@@ -239,12 +243,36 @@ def single_worker_vectorisation(vector_model,
       #     tgt_eos=hparams.eos,
       #     subword_option=hparams.subword_option)
     else:
-      nmt_utils.vectorize(
-        loaded_vector_model,
-        sess,
-        output_vector,
-        beam_width=hparams.beam_width,
-        num_vectors_per_input=hparams.num_translations_per_input)
+      vector_summary = nmt_utils.vectorize(loaded_vector_model,
+                                           sess,
+                                           output_vector,
+                                           beam_width=hparams.beam_width,
+                                           num_vectors_per_input=hparams.num_translations_per_input)
+
+    save_vectorizer(ckpt, sess, vector_model, vector_summary)
+
+
+def save_vectorizer(ckpt, sess, vector_model, vector_summary):
+  # ===========================================================
+  #  The saving of the model / checkpoints / logs, etc.
+  # ===========================================================
+  ckpt_dirname = os.path.join(os.path.dirname(ckpt), "vectorizer")
+
+  # so I can see the vectorization-only graph in TensorBoard
+  summary_writer = tf.summary.FileWriter(ckpt_dirname, vector_model.graph)
+  summary_writer.add_summary(vector_summary)
+  summary_writer.flush()
+
+  # Save vectorization model for reuse later (Java code)
+  vector_model.model.saver.save(sess, os.path.join(ckpt_dirname, "vectorizer.ckpt"))
+
+  model_export_dir = os.path.join(ckpt_dirname, "model_export")
+
+  builder = tf.saved_model.builder.SavedModelBuilder(model_export_dir)
+  builder.add_meta_graph_and_variables(sess,
+                                       ["vectorize"],
+                                       clear_devices=True)
+  builder.save()
 
 
 def multi_worker_inference(infer_model,

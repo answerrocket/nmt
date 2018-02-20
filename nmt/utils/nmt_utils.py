@@ -119,6 +119,7 @@ def vectorize(model,
 
   start_time = time.time()
   num_sentences = 0
+  last_summary = None
   with codecs.getwriter("utf-8")(
     tf.gfile.GFile(vector_file, mode="wb")) as vector_f:
     vector_f.write("")  # Write empty string to ensure file is created.
@@ -127,7 +128,7 @@ def vectorize(model,
       min(num_vectors_per_input, beam_width), 1)
     while True:
       try:
-        nmt_vectors = model.vectorise(sess)
+        nmt_vectors, last_summary = model.vectorise(sess)
         # shape we get here is RNN layer, (h/c), sentence_index, RNN units
         nmt_vectors = np.transpose(np.asarray(nmt_vectors), (2, 0, 1, 3))
 
@@ -146,6 +147,8 @@ def vectorize(model,
           "  done, num sentences %d, num translations per input %d" %
           (num_sentences, num_vectors_per_input), start_time)
         break
+
+  return last_summary
 
 
 def get_vectorisation(encoded_state):

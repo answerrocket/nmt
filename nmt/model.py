@@ -120,7 +120,7 @@ class BaseModel(object):
       self.sample_words = reverse_target_vocab_table.lookup(
           tf.to_int64(self.sample_id))
     elif self.mode == "VECTOR":
-      self.sample_vector = res[4]
+      self.sample_vector = tf.stack(res[4], name="SentenceEncoding")
 
     if self.mode not in [tf.contrib.learn.ModeKeys.INFER, "VECTOR"]:
       ## Count the number of predicted words for compute ppl.
@@ -253,7 +253,8 @@ class BaseModel(object):
             tgt_vocab_file=hparams.tgt_vocab_file,
             src_embed_file=hparams.src_embed_file,
             tgt_embed_file=hparams.tgt_embed_file,
-            scope=scope,))
+            scope=scope,
+            hparams=hparams))
 
   def train(self, sess):
     assert self.mode == tf.contrib.learn.ModeKeys.TRAIN
@@ -517,7 +518,7 @@ class BaseModel(object):
     return loss
 
   def _get_infer_summary(self, hparams):
-    return tf.no_op()
+    return tf.summary.scalar("the_secret_of_the_universe", tf.constant(42))
 
   def infer(self, sess):
     assert self.mode == tf.contrib.learn.ModeKeys.INFER
@@ -527,9 +528,9 @@ class BaseModel(object):
 
   def vector(self, sess):
     assert self.mode == "VECTOR"
-    return sess.run(
-      self.sample_vector
-    )
+    return sess.run([
+      self.sample_vector, self.infer_summary
+    ])
 
   def decode(self, sess):
     """Decode a batch.
@@ -561,7 +562,7 @@ class BaseModel(object):
     Returns:
       A tensor of the encoded state
     """
-    sample_vector = self.vector(sess)
+    sample_vector, vector_summary = self.vector(sess)
 
     # if self.time_major:
     #   sample_vector = sample_vector.transpose()
@@ -569,7 +570,7 @@ class BaseModel(object):
     #   # time, beam_width] shape.
     #   sample_vector = sample_vector.transpose([2, 0, 1])
 
-    return sample_vector
+    return sample_vector, vector_summary
 
 class Model(BaseModel):
   """Sequence-to-sequence dynamic model.

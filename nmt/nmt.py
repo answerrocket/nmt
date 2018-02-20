@@ -635,7 +635,7 @@ def main(unused_argv):
   train_fn = train.train
   inference_fn = inference.inference
   vectorization_fn = inference.vectorisation
-  run_main(FLAGS, default_hparams, train_fn, inference_fn,vectorization_fn=vectorization_fn)
+  run_main(FLAGS, default_hparams, train_fn, inference_fn, vectorization_fn=vectorization_fn)
 
 
 if __name__ == "__main__":
