@@ -641,5 +641,7 @@ def main(unused_argv):
 if __name__ == "__main__":
   nmt_parser = argparse.ArgumentParser()
   add_arguments(nmt_parser)
-  FLAGS, unparsed = nmt_parser.parse_known_args()
+  # TODO: hack - intelliJ doesn't like to apply environment vars  - generalize for all env vars?
+  processed_args = [arg.replace("${NMT_DIR}", os.environ.get("NMT_DIR")) for arg in sys.argv[1:]]
+  FLAGS, unparsed = nmt_parser.parse_known_args(args=processed_args)
   tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
