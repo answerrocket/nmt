@@ -267,8 +267,17 @@ def choose_unique_log_dir():
 
   if log_dir is None:
     log_dir = LOG_NAME_STUB + str(find_max_dir_num() + 1)
+    os.makedirs(os.path.join(arguments.out_dir, log_dir))
 
-  return log_dir
+  return os.path.join(arguments.out_dir, log_dir)
+
+
+def reuse_last_log_dir():
+  global log_dir
+
+  if log_dir is None:
+    log_dir = LOG_NAME_STUB + str(find_max_dir_num())
+
 
 
 def latest_output_log_dir():
@@ -354,6 +363,9 @@ def train_classifier():
   src_size = train_src.shape[1]
   tgt_size = train_tgt.shape[1]
 
+  if not os.path.exists(arguments.out_dir):
+    os.makedirs(arguments.out_dir)
+
   model = build_model(src_size, tgt_size)
 
   # Run SGD
@@ -427,6 +439,8 @@ def get_checkpoint():
 
 
 def run_classifier():
+  reuse_last_log_dir()
+
   ckpt = get_checkpoint()
 
   assert ckpt is not None
@@ -485,5 +499,7 @@ def main(unused_argv):
 if __name__ == "__main__":
   arg_parser = argparse.ArgumentParser()
   add_arguments(arg_parser)
-  arguments, unparsed = arg_parser.parse_known_args()
+  # TODO: hack - intelliJ doesn't like to apply environment vars to arguments  - generalize for all env vars?
+  processed_args = [arg.replace("${NMT_DIR}", os.environ.get("NMT_DIR")) for arg in sys.argv[1:]]
+  arguments, unparsed = arg_parser.parse_known_args(args=processed_args)
   tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
