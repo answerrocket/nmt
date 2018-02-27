@@ -182,8 +182,13 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
   tgt_vocab_file = hparams.tgt_vocab_file
 
   with graph.as_default(), tf.container(scope or "infer"):
+    src_vocab_file_name_ph = tf.placeholder(dtype=tf.string, name="SourceVocabFilename_ph")
+
     src_vocab_table, tgt_vocab_table = vocab_utils.create_vocab_tables(
-        src_vocab_file, tgt_vocab_file, hparams.share_vocab)
+      src_vocab_file_name_ph, tgt_vocab_file, hparams.share_vocab)
+
+    # src_vocab_table, tgt_vocab_table = vocab_utils.create_vocab_tables(
+    #     src_vocab_file, tgt_vocab_file, hparams.share_vocab)
     reverse_tgt_vocab_table = lookup_ops.index_to_string_table_from_file(
         tgt_vocab_file, default_value=vocab_utils.UNK)
 
@@ -212,7 +217,8 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
       model=model,
       src_placeholder=src_placeholder,
       batch_size_placeholder=batch_size_placeholder,
-      iterator=iterator)
+      iterator=iterator,
+      src_vocab_file_name_ph=src_vocab_file_name_ph)
 
 
 def create_vector_model(model_creator, hparams, scope=None, extra_args=None):
@@ -608,15 +614,15 @@ def avg_checkpoints(model_dir, num_last_checkpoints, global_step,
   return avg_model_dir
 
 
-def create_or_load_model(model, model_dir, session, name):
+def create_or_load_model(model, model_dir, session, name, feed_dict=None):
   """Create translation model and initialize or load parameters in session."""
   latest_ckpt = tf.train.latest_checkpoint(model_dir)
   if latest_ckpt:
-    model = load_model(model, latest_ckpt, session, name)
+    model = load_model(model, latest_ckpt, session, name, feed_dict=feed_dict)
   else:
     start_time = time.time()
-    session.run(tf.global_variables_initializer())
-    session.run(tf.tables_initializer())
+    session.run(tf.global_variables_initializer(), feed_dict=feed_dict)
+    session.run(tf.tables_initializer(), feed_dict=feed_dict)
     utils.print_out("  created %s model with fresh parameters, time %.2fs" %
                     (name, time.time() - start_time))
 

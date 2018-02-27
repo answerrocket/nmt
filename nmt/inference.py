@@ -174,8 +174,13 @@ def single_worker_inference(infer_model,
 
   with tf.Session(
       graph=infer_model.graph, config=utils.get_config_proto()) as sess:
+    feed_dict={
+      infer_model.src_placeholder: infer_data,
+      infer_model.batch_size_placeholder: hparams.infer_batch_size,
+      infer_model.src_vocab_file_name_ph: hparams.src_vocab_file
+    }
     loaded_infer_model = model_helper.load_model(
-        infer_model.model, ckpt, sess, "infer", hparams)
+        infer_model.model, ckpt, sess, "infer", feed_dict=feed_dict)
     sess.run(
         infer_model.iterator.initializer,
         feed_dict={

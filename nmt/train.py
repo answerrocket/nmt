@@ -43,8 +43,14 @@ def run_sample_decode(infer_model, infer_sess, model_dir, hparams,
                       summary_writer, src_data, tgt_data):
   """Sample decode a random sentence from src_data."""
   with infer_model.graph.as_default():
+    feed_dict={
+      infer_model.src_placeholder: src_data,
+      infer_model.batch_size_placeholder: hparams.infer_batch_size,
+      infer_model.src_vocab_file_name_ph: hparams.src_vocab_file
+    }
+
     loaded_infer_model, global_step = model_helper.create_or_load_model(
-        infer_model.model, model_dir, infer_sess, "infer")
+        infer_model.model, model_dir, infer_sess, "infer", feed_dict=feed_dict)
 
   _sample_decode(loaded_infer_model, global_step, infer_sess, hparams,
                  infer_model.iterator, src_data, tgt_data,
@@ -57,8 +63,14 @@ def run_internal_eval(
     use_test_set=True):
   """Compute internal evaluation (perplexity) for both dev / test."""
   with eval_model.graph.as_default():
+    feed_dict={
+      # eval_model.src_placeholder: None,  # TODO: do I need to populate this??
+      # eval_model.batch_size_placeholder: hparams.infer_batch_size,
+      # eval_model.src_vocab_file_name_ph: hparams.src_vocab_file
+    }
+
     loaded_eval_model, global_step = model_helper.create_or_load_model(
-        eval_model.model, model_dir, eval_sess, "eval")
+          eval_model.model, model_dir, eval_sess, "eval", feed_dict=feed_dict)
 
   dev_src_file = "%s.%s" % (hparams.dev_prefix, hparams.src)
   dev_tgt_file = "%s.%s" % (hparams.dev_prefix, hparams.tgt)
@@ -87,50 +99,53 @@ def run_internal_eval(
 def run_external_eval(infer_model, infer_sess, model_dir, hparams,
                       summary_writer, save_best_dev=True, use_test_set=True,
                       avg_ckpts=False):
+  dev_src_file = "%s.%s" % (hparams.dev_prefix, hparams.src)
+  dev_tgt_file = "%s.%s" % (hparams.dev_prefix, hparams.tgt)
+
+  feed_dict={
+    infer_model.src_placeholder: inference.load_data(dev_src_file),
+    infer_model.batch_size_placeholder: hparams.infer_batch_size,
+    infer_model.src_vocab_file_name_ph: hparams.src_vocab_file
+  }
   """Compute external evaluation (bleu, rouge, etc.) for both dev / test."""
   with infer_model.graph.as_default():
     loaded_infer_model, global_step = model_helper.create_or_load_model(
-        infer_model.model, model_dir, infer_sess, "infer")
+      infer_model.model, model_dir, infer_sess, "infer", feed_dict=feed_dict)
 
-  dev_src_file = "%s.%s" % (hparams.dev_prefix, hparams.src)
-  dev_tgt_file = "%s.%s" % (hparams.dev_prefix, hparams.tgt)
-  dev_infer_iterator_feed_dict = {
-      infer_model.src_placeholder: inference.load_data(dev_src_file),
-      infer_model.batch_size_placeholder: hparams.infer_batch_size,
-  }
   dev_scores = _external_eval(
-      loaded_infer_model,
-      global_step,
-      infer_sess,
-      hparams,
-      infer_model.iterator,
-      dev_infer_iterator_feed_dict,
-      dev_tgt_file,
-      "dev",
-      summary_writer,
-      save_on_best=save_best_dev,
-      avg_ckpts=avg_ckpts)
+    loaded_infer_model,
+    global_step,
+    infer_sess,
+    hparams,
+    infer_model.iterator,
+    feed_dict,
+    dev_tgt_file,
+    "dev",
+    summary_writer,
+    save_on_best=save_best_dev,
+    avg_ckpts=avg_ckpts)
 
   test_scores = None
   if use_test_set and hparams.test_prefix:
     test_src_file = "%s.%s" % (hparams.test_prefix, hparams.src)
     test_tgt_file = "%s.%s" % (hparams.test_prefix, hparams.tgt)
     test_infer_iterator_feed_dict = {
-        infer_model.src_placeholder: inference.load_data(test_src_file),
-        infer_model.batch_size_placeholder: hparams.infer_batch_size,
+      infer_model.src_placeholder: inference.load_data(test_src_file),
+      infer_model.batch_size_placeholder: hparams.infer_batch_size,
+      infer_model.src_vocab_file_name_ph: hparams.src_vocab_file
     }
     test_scores = _external_eval(
-        loaded_infer_model,
-        global_step,
-        infer_sess,
-        hparams,
-        infer_model.iterator,
-        test_infer_iterator_feed_dict,
-        test_tgt_file,
-        "test",
-        summary_writer,
-        save_on_best=False,
-        avg_ckpts=avg_ckpts)
+      loaded_infer_model,
+      global_step,
+      infer_sess,
+      hparams,
+      infer_model.iterator,
+      test_infer_iterator_feed_dict,
+      test_tgt_file,
+      "test",
+      summary_writer,
+      save_on_best=False,
+      avg_ckpts=avg_ckpts)
   return dev_scores, test_scores, global_step
 
 
